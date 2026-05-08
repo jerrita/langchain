@@ -18,7 +18,14 @@ from langchain_core.language_models import (
     ModelProfile,
     ModelProfileRegistry,
 )
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    BaseMessage,
+    InputTokenDetails,
+    OutputTokenDetails,
+    UsageMetadata,
+)
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
@@ -42,6 +49,41 @@ _MODEL_PROFILES = cast("ModelProfileRegistry", _PROFILES)
 def _get_default_model_profile(model_name: str) -> ModelProfile:
     default = _MODEL_PROFILES.get(model_name) or {}
     return default.copy()
+
+
+def _create_usage_metadata(token_usage: dict[str, Any]) -> UsageMetadata:
+    input_tokens = token_usage.get("prompt_tokens") or 0
+    output_tokens = token_usage.get("completion_tokens") or 0
+    total_tokens = token_usage.get("total_tokens") or input_tokens + output_tokens
+
+    prompt_tokens_details = token_usage.get("prompt_tokens_details") or {}
+    completion_tokens_details = token_usage.get("completion_tokens_details") or {}
+
+    cache_read = token_usage.get("prompt_cache_hit_tokens")
+    if cache_read is None:
+        cache_read = prompt_tokens_details.get("cached_tokens")
+
+    input_token_details = {
+        "cache_read": cache_read,
+        "cache_creation": token_usage.get("prompt_cache_miss_tokens"),
+    }
+    output_token_details = {
+        "reasoning": completion_tokens_details.get("reasoning_tokens"),
+    }
+    usage_metadata: UsageMetadata = {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
+    if filtered_input := {
+        k: v for k, v in input_token_details.items() if v is not None
+    }:
+        usage_metadata["input_token_details"] = InputTokenDetails(**filtered_input)  # type: ignore[typeddict-item]
+    if filtered_output := {
+        k: v for k, v in output_token_details.items() if v is not None
+    }:
+        usage_metadata["output_token_details"] = OutputTokenDetails(**filtered_output)  # type: ignore[typeddict-item]
+    return usage_metadata
 
 
 class ChatDeepSeek(BaseChatOpenAI):
@@ -313,6 +355,18 @@ class ChatDeepSeek(BaseChatOpenAI):
     ) -> ChatResult:
         rtn = super()._create_chat_result(response, generation_info)
 
+        response_dict = (
+            response.model_dump()
+            if isinstance(response, openai.BaseModel)
+            else response
+        )
+        token_usage = response_dict.get("usage")
+        if token_usage:
+            usage_metadata = _create_usage_metadata(token_usage)
+            for generation in rtn.generations:
+                if isinstance(generation.message, AIMessage):
+                    generation.message.usage_metadata = usage_metadata
+
         if not isinstance(response, openai.BaseModel):
             return rtn
 
@@ -349,13 +403,18 @@ class ChatDeepSeek(BaseChatOpenAI):
             default_chunk_class,
             base_generation_info,
         )
-        if (choices := chunk.get("choices")) and generation_chunk:
-            top = choices[0]
-            if isinstance(generation_chunk.message, AIMessageChunk):
-                generation_chunk.message.response_metadata = {
-                    **generation_chunk.message.response_metadata,
-                    "model_provider": "deepseek",
-                }
+        if generation_chunk and isinstance(generation_chunk.message, AIMessageChunk):
+            if token_usage := chunk.get("usage"):
+                generation_chunk.message.usage_metadata = _create_usage_metadata(
+                    token_usage,
+                )
+            generation_chunk.message.response_metadata = {
+                **generation_chunk.message.response_metadata,
+                "model_provider": "deepseek",
+            }
+
+            if choices := chunk.get("choices"):
+                top = choices[0]
                 if (
                     reasoning_content := top.get("delta", {}).get("reasoning_content")
                 ) is not None:

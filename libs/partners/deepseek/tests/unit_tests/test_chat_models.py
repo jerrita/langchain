@@ -153,6 +153,40 @@ class TestChatDeepSeekCustomUnit:
             == "This is the reasoning"
         )
 
+    def test_create_chat_result_with_deepseek_usage_metadata(self) -> None:
+        """Test that DeepSeek-specific token usage is mapped."""
+        chat_model = ChatDeepSeek(model=MODEL_NAME, api_key=SecretStr("api_key"))
+        response: dict[str, Any] = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": "Main content"},
+                },
+            ],
+            "model": MODEL_NAME,
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "prompt_cache_hit_tokens": 7,
+                "prompt_cache_miss_tokens": 3,
+                "completion_tokens_details": {"reasoning_tokens": 2},
+            },
+        }
+
+        result = chat_model._create_chat_result(response)
+        message = result.generations[0].message
+        assert isinstance(message, AIMessage)
+        usage_metadata = message.usage_metadata
+
+        assert usage_metadata == {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "total_tokens": 15,
+            "input_token_details": {"cache_read": 7, "cache_creation": 3},
+            "output_token_details": {"reasoning": 2},
+        }
+
     def test_convert_chunk_with_reasoning_content(self) -> None:
         """Test that reasoning_content is properly extracted from streaming chunk."""
         chat_model = ChatDeepSeek(model=MODEL_NAME, api_key=SecretStr("api_key"))
@@ -206,6 +240,38 @@ class TestChatDeepSeekCustomUnit:
             chunk_result.message.additional_kwargs.get("reasoning_content")
             == "Streaming reasoning"
         )
+
+    def test_convert_chunk_with_deepseek_usage_metadata(self) -> None:
+        """Test that DeepSeek-specific token usage is mapped for chunks."""
+        chat_model = ChatDeepSeek(model=MODEL_NAME, api_key=SecretStr("api_key"))
+        chunk: dict[str, Any] = {
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 8,
+                "completion_tokens": 4,
+                "total_tokens": 12,
+                "prompt_cache_hit_tokens": 6,
+                "prompt_cache_miss_tokens": 2,
+                "completion_tokens_details": {"reasoning_tokens": 1},
+            },
+        }
+
+        chunk_result = chat_model._convert_chunk_to_generation_chunk(
+            chunk,
+            AIMessageChunk,
+            None,
+        )
+        if chunk_result is None:
+            msg = "Expected chunk_result not to be None"
+            raise AssertionError(msg)
+        assert isinstance(chunk_result.message, AIMessageChunk)
+        assert chunk_result.message.usage_metadata == {
+            "input_tokens": 8,
+            "output_tokens": 4,
+            "total_tokens": 12,
+            "input_token_details": {"cache_read": 6, "cache_creation": 2},
+            "output_token_details": {"reasoning": 1},
+        }
 
     def test_convert_chunk_without_reasoning(self) -> None:
         """Test that chunk without reasoning fields works correctly."""
