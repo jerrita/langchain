@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 from unittest.mock import MagicMock
 
-from langchain_core.messages import AIMessageChunk, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from langchain_tests.unit_tests import ChatModelUnitTests
 from openai import BaseModel
 from openai.types.chat import ChatCompletionMessage
@@ -252,6 +252,30 @@ class TestChatDeepSeekCustomUnit:
         tool_message = ToolMessage(content="test string", tool_call_id="test_id")
         payload = chat_model._get_request_payload([tool_message])
         assert payload["messages"][0]["content"] == "test string"
+
+    def test_get_request_payload_preserves_reasoning_content(self) -> None:
+        """Test that reasoning content is preserved for DeepSeek thinking mode."""
+        chat_model = ChatDeepSeek(model=MODEL_NAME, api_key=SecretStr("api_key"))
+        ai_message = AIMessage(
+            content="",
+            additional_kwargs={
+                "reasoning_content": "Need to call a tool before answering.",
+                "tool_calls": [
+                    {
+                        "id": "call_123",
+                        "type": "function",
+                        "function": {"name": "sample_tool", "arguments": "{}"},
+                    }
+                ],
+            },
+        )
+
+        payload = chat_model._get_request_payload([ai_message])
+
+        assert (
+            payload["messages"][0]["reasoning_content"]
+            == "Need to call a tool before answering."
+        )
 
 
 class SampleTool(PydanticBaseModel):
