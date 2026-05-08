@@ -472,7 +472,8 @@ class ChatDeepSeek(BaseChatOpenAI):
             "function_calling",
             "json_mode",
             "json_schema",
-        ] = "function_calling",
+        ]
+        | None = None,
         include_raw: bool = False,
         strict: bool | None = None,
         **kwargs: Any,
@@ -496,7 +497,9 @@ class ChatDeepSeek(BaseChatOpenAI):
                 more on how to properly specify types and descriptions of schema fields
                 when specifying a Pydantic or `TypedDict` class.
 
-            method: The method for steering model generation, one of:
+            method: The method for steering model generation. If not specified,
+                defaults to `'json_mode'`, unless `strict=True`, in which case it
+                defaults to `'function_calling'`. Must be one of:
 
                 - `'function_calling'`:
                     Uses DeepSeek's [tool-calling features](https://api-docs.deepseek.com/guides/function_calling).
@@ -544,6 +547,9 @@ class ChatDeepSeek(BaseChatOpenAI):
                     depends on the `schema` as described above.
                 - `'parsing_error'`: `BaseException | None`
         """
+        if method is None:
+            method = "function_calling" if strict is True else "json_mode"
+
         # Some applications require that incompatible parameters (e.g., unsupported
         # methods) be handled.
         if method == "json_schema":

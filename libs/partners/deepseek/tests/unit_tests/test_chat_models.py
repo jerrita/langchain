@@ -284,6 +284,24 @@ class SampleTool(PydanticBaseModel):
     value: str = Field(description="A test value")
 
 
+class TestChatDeepSeekStructuredOutput:
+    """Tests for DeepSeek structured output behavior."""
+
+    def test_with_structured_output_defaults_to_json_mode(self) -> None:
+        """Test that with_structured_output defaults to JSON mode."""
+        llm = ChatDeepSeek(
+            model="deepseek-chat",
+            api_key=SecretStr("test_key"),
+        )
+
+        structured_model = llm.with_structured_output(SampleTool)
+        llm_step = structured_model.steps[0]  # type: ignore[attr-defined]
+
+        assert llm_step.kwargs["response_format"] == {"type": "json_object"}
+        assert "tools" not in llm_step.kwargs
+        assert "tool_choice" not in llm_step.kwargs
+
+
 class TestChatDeepSeekStrictMode:
     """Tests for DeepSeek strict mode support.
 
@@ -337,9 +355,12 @@ class TestChatDeepSeekStrictMode:
 
         # Create structured output with strict=True
         structured_model = llm.with_structured_output(SampleTool, strict=True)
+        llm_step = structured_model.steps[0]  # type: ignore[attr-defined]
 
         # The structured model should work with beta endpoint
         assert structured_model is not None
+        assert "tools" in llm_step.kwargs
+        assert "response_format" not in llm_step.kwargs
 
 
 class TestChatDeepSeekAzureToolChoice:
@@ -444,9 +465,9 @@ class TestChatDeepSeekAzureToolChoice:
         """Test that with_structured_output works on Azure (the original bug)."""
         llm = self._get_azure_model()
 
-        # with_structured_output internally calls bind_tools with the schema
-        # name as tool_choice, which gets converted to the dict form.
-        structured = llm.with_structured_output(SampleTool)
+        # with_structured_output with function_calling internally calls bind_tools
+        # with the schema name as tool_choice, which gets converted to the dict form.
+        structured = llm.with_structured_output(SampleTool, method="function_calling")
         assert structured is not None
 
     def test_bind_tools_azure_with_strict_mode(self) -> None:
